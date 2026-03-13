@@ -29,6 +29,27 @@ DEFAULT_FALLBACK_POSITIVES = [
     "변경 범위가 비교적 집중되어 있어 의도를 따라가기 쉽습니다.",
 ]
 DEFAULT_NO_CONCERNS_TEXT = "이번 diff 기준으로 별도 개선 필요 사항은 발견되지 않았습니다."
+LOW_SIGNAL_POSITIVE_MARKERS = (
+    "pr diff가 잘 작성",
+    "pr diff의 내용이 잘 정리",
+    "변경 내용이 잘 정리",
+    "모든 파일이 잘 수정",
+)
+NO_CONCERN_TEXTS = {
+    DEFAULT_NO_CONCERNS_TEXT,
+    "별도 개선 필요 사항은 발견되지 않았습니다.",
+    "개선이 필요한 점은 발견되지 않았습니다.",
+    "개선이 필요한 점은 없습니다.",
+}
+COMMON_TYPO_FIXES = {
+    ("sta", "uts"): "status",
+    ("reposit", "roy"): "repository",
+    ("pull", "_nub", "mer"): "pull_number",
+    ("X-GitHub-", "Eevnt"): "X-GitHub-Event",
+}
+
+SECRET_LOG_RE = re.compile(r"\b(token|secret|password|passwd|api[_-]?key|authorization)\b", re.IGNORECASE)
+LOG_CALL_RE = re.compile(r"\b(print|logging\.\w+|logger\.\w+)\s*\(")
 DIFF_STAT_RE = re.compile(r"\d+\s*개\s*(?:추가|삭제|변경)")
 PROMPT_ECHO_MARKERS = (
     "review_runner/",
@@ -78,6 +99,7 @@ def sanitize_text_items(items: list[str], max_items: int = 5) -> list[str]:
         if (
             not text
             or text in seen
+            or text in NO_CONCERN_TEXTS
             or looks_like_prompt_echo(text)
             or looks_like_diff_stat_dump(text)
         ):
@@ -88,6 +110,46 @@ def sanitize_text_items(items: list[str], max_items: int = 5) -> list[str]:
             break
 
     return sanitized
+
+
+def sanitize_positive_items(items: list[str], max_items: int = 5) -> list[str]:
+    sanitized: list[str] = []
+    seen: set[str] = set()
+
+    for item in items:
+        text = normalize_text(item)
+        if (
+            not text
+            or text in seen
+            or looks_like_prompt_echo(text)
+            or looks_like_diff_stat_dump(text)
+            or looks_like_generic_positive(text)
+        ):
+            continue
+        seen.add(text)
+        sanitized.append(text)
+        if len(sanitized) >= max_items:
+            break
+
+    return sanitized
+
+
+def looks_like_praise_only_comment(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+
+    if looks_like_generic_positive(normalized):
+        return True
+
+    lowered = normalized.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "핵심 변경 의도가 diff 안에서 비교적 명확하게 드러납니다.",
+            "변경 범위가 비교적 집중되어 있어 의도를 따라가기 쉽습니다.",
+        )
+    )
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -264,6 +326,158 @@ def summarize_comment_bodies(comments: list[ReviewComment], max_items: int = 3) 
     return summaries
 
 
+def merge_distinct_items(primary: list[str], secondary: list[str], max_items: int = 5) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    for item in [*primary, *secondary]:
+        text = normalize_text(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+        if len(merged) >= max_items:
+            break
+
+    return merged
+
+
+def iter_patch_lines(patch: str) -> list[tuple[str, int, str]]:
+    rows: list[tuple[str, int, str]] = []
+    current_new_line: int | None = None
+
+    for raw_line in patch.splitlines():
+        if raw_line.startswith("@@"):
+            parts = raw_line.split()
+            new_range = next(part for part in parts if part.startswith("+"))
+            start_and_len = new_range[1:]
+            start_str = start_and_len.split(",", 1)[0]
+            current_new_line = int(start_str)
+            continue
+
+        if current_new_line is None:
+            continue
+
+        if raw_line.startswith("+"):
+            rows.append(("add", current_new_line, raw_line[1:]))
+            current_new_line += 1
+        elif raw_line.startswith(" "):
+            rows.append(("context", current_new_line, raw_line[1:]))
+            current_new_line += 1
+        elif raw_line.startswith("-"):
+            rows.append(("remove", current_new_line, raw_line[1:]))
+        else:
+            current_new_line = None
+
+    return rows
+
+
+def detect_signature_bypass(pr_file: PullRequestFile) -> list[ReviewComment]:
+    findings: list[ReviewComment] = []
+    previous_visible_line = ""
+
+    for kind, line_number, text in iter_patch_lines(pr_file.patch):
+        stripped = text.strip()
+        if kind in {"add", "context"}:
+            if kind == "add":
+                previous_visible_line_lower = previous_visible_line.lower()
+                if stripped == "return" and (
+                    "if not signature" in previous_visible_line_lower
+                    or "if not hmac.compare_digest" in previous_visible_line_lower
+                ):
+                    findings.append(
+                        ReviewComment(
+                            path=pr_file.filename,
+                            line=line_number,
+                            body=(
+                                "서명 헤더가 없을 때 바로 반환하면 서명 검증이 건너뛰어져 위조된 웹훅도 처리될 수 있습니다. "
+                                "누락된 서명은 401로 거부하도록 유지하세요."
+                            ),
+                        )
+                    )
+                elif re.search(r"if\s+not\s+.*signature.*:\s*return\b", stripped, re.IGNORECASE) or re.search(
+                    r"if\s+not\s+hmac\.compare_digest\(.*\)\s*:\s*return\b",
+                    stripped,
+                    re.IGNORECASE,
+                ):
+                    findings.append(
+                        ReviewComment(
+                            path=pr_file.filename,
+                            line=line_number,
+                            body=(
+                                "서명 값이 없을 때 요청을 통과시키고 있어 인증되지 않은 웹훅을 받아들이게 됩니다. "
+                                "서명 누락이나 불일치는 예외를 발생시켜 요청을 거부해야 합니다."
+                            ),
+                        )
+                    )
+            previous_visible_line = stripped
+
+    return findings
+
+
+def detect_secret_logging(pr_file: PullRequestFile) -> list[ReviewComment]:
+    findings: list[ReviewComment] = []
+
+    for kind, line_number, text in iter_patch_lines(pr_file.patch):
+        if kind != "add":
+            continue
+
+        if LOG_CALL_RE.search(text) and SECRET_LOG_RE.search(text):
+            findings.append(
+                ReviewComment(
+                    path=pr_file.filename,
+                    line=line_number,
+                    body=(
+                        "토큰이나 secret 값을 로그에 남기면 서버 로그 접근만으로 인증 정보가 유출될 수 있습니다. "
+                        "민감한 값은 출력하지 말고, 필요하면 마스킹된 메타데이터만 기록하세요."
+                    ),
+                )
+            )
+
+    return findings
+
+
+def detect_contract_typos(pr_file: PullRequestFile) -> list[ReviewComment]:
+    findings: list[ReviewComment] = []
+
+    for kind, line_number, text in iter_patch_lines(pr_file.patch):
+        if kind != "add":
+            continue
+
+        for typo_parts, expected in COMMON_TYPO_FIXES.items():
+            typo = "".join(typo_parts)
+            if f'"{typo}"' not in text and f"'{typo}'" not in text:
+                continue
+            findings.append(
+                ReviewComment(
+                    path=pr_file.filename,
+                    line=line_number,
+                    body=(
+                        f"`{typo}` 오타 때문에 기존 계약에서 기대하는 `{expected}` 키나 헤더를 찾지 못해 호출 흐름이 깨질 수 있습니다. "
+                        f"공개 응답 필드와 GitHub 헤더 이름은 `{expected}`로 정확히 유지하세요."
+                    ),
+                )
+            )
+            break
+
+    return findings
+
+
+def detect_rule_based_comments(files: list[PullRequestFile]) -> list[ReviewComment]:
+    comments: list[ReviewComment] = []
+    seen: set[tuple[str, int, str]] = set()
+
+    for pr_file in files:
+        for comment in detect_signature_bypass(pr_file) + detect_secret_logging(pr_file) + detect_contract_typos(pr_file):
+            key = (comment.path, comment.line, comment.body)
+            if key in seen:
+                continue
+            seen.add(key)
+            comments.append(comment)
+
+    return comments
+
+
 def is_placeholder_summary(summary: str) -> bool:
     normalized = normalize_text(summary)
     return not normalized or normalized in {
@@ -295,6 +509,13 @@ def looks_like_diff_stat_dump(text: str) -> bool:
     number_count = len(re.findall(r"\d+", normalized))
     stat_word_count = sum(normalized.count(word) for word in ("추가", "삭제", "변경"))
     return number_count >= 8 and stat_word_count >= 6
+
+
+def looks_like_generic_positive(text: str) -> bool:
+    normalized = normalize_text(text).lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in LOW_SIGNAL_POSITIVE_MARKERS)
 
 
 def sanitize_summary(summary: Any, has_findings: bool) -> str:
@@ -408,23 +629,37 @@ def validate_mlx_output(
 ) -> tuple[list[ReviewComment], str, str, list[str], list[str]]:
     file_index = {f.filename: f for f in files}
     comments: list[ReviewComment] = []
+    seen_comment_keys: set[tuple[str, int, str]] = set()
 
     for raw in result.get("comments", []):
         path = raw.get("path")
         line = raw.get("line")
         body = normalize_text(raw.get("body"))
-        if not path or not isinstance(line, int) or not body:
+        if not path or not isinstance(line, int) or not body or looks_like_praise_only_comment(body):
             continue
 
         pr_file = file_index.get(path)
         if pr_file is None or line not in pr_file.right_side_lines:
             continue
 
+        key = (path, line, body)
+        if key in seen_comment_keys:
+            continue
+        seen_comment_keys.add(key)
         comments.append(ReviewComment(path=path, line=line, body=body))
 
+    for comment in detect_rule_based_comments(files):
+        key = (comment.path, comment.line, comment.body)
+        if key in seen_comment_keys:
+            continue
+        seen_comment_keys.add(key)
+        comments.append(comment)
+
     summary = normalize_text(result.get("summary")) or "자동 리뷰를 완료했습니다."
-    positives = sanitize_text_items(normalize_text_list(result.get("positives"), max_items=10))
+    positives = sanitize_positive_items(normalize_text_list(result.get("positives"), max_items=10))
     concerns = sanitize_text_items(normalize_text_list(result.get("concerns"), max_items=10))
+    comment_summaries = summarize_comment_bodies(comments, max_items=3)
+    concerns = merge_distinct_items(concerns, comment_summaries, max_items=3)
 
     event = normalize_text(result.get("event")).upper()
     if event not in {"COMMENT", "REQUEST_CHANGES"}:
@@ -439,8 +674,6 @@ def validate_mlx_output(
         summary = sanitize_summary(summary, has_findings=True)
         if not positives:
             positives = ["핵심 변경 의도가 diff 안에서 비교적 명확하게 드러납니다."]
-        if not concerns:
-            concerns = summarize_comment_bodies(comments)
         event = "REQUEST_CHANGES"
 
     return comments, summary, event, positives, concerns
@@ -495,6 +728,14 @@ def build_review_payload(
     }
 
 
+def should_retry_review_as_comment(error: RuntimeError, payload: dict[str, Any]) -> bool:
+    if payload.get("event") != "REQUEST_CHANGES":
+        return False
+
+    message = normalize_text(str(error)).lower()
+    return "request changes on your own pull request" in message
+
+
 def review_pull_request(
     repository: str,
     pull_number: int,
@@ -539,15 +780,34 @@ def review_pull_request(
     if dry_run:
         return result
 
-    response = github.post_review(pull_number, payload)
+    posted_event = event
+    fallback_note = ""
+    try:
+        response = github.post_review(pull_number, payload)
+    except RuntimeError as exc:
+        if not should_retry_review_as_comment(exc, payload):
+            raise
+
+        retry_payload = dict(payload)
+        retry_payload["event"] = "COMMENT"
+        response = github.post_review(pull_number, retry_payload)
+        payload = retry_payload
+        posted_event = "COMMENT"
+        result["requested_event"] = event
+        result["event"] = posted_event
+        result["payload"] = payload
+        fallback_note = "Requested changes is not allowed on your own pull request, so the review was posted as COMMENT instead."
+
     message_lines = [
         "Posted review successfully.",
         f"Review ID: {response.get('id')}",
-        f"Event: {event}",
+        f"Event: {posted_event}",
         f"Comments: {len(comments)}",
         "",
         payload["body"],
     ]
+    if fallback_note:
+        message_lines[1:1] = [fallback_note]
     if comments:
         message_lines.extend(
             [
