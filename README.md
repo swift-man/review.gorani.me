@@ -13,12 +13,14 @@ Mac mini 안의 고정 경로 예시:
 │   └── nginx-pr-review.conf
 ├── review_runner/
 │   ├── __init__.py
+│   ├── mlx_review_client.py
 │   ├── review_service.py
 │   ├── review_pr.py
 │   ├── sample_mlx_client.py
 │   ├── webhook_app.py
 │   └── requirements.txt
 ├── scripts/
+│   ├── warm_mlx_model.sh
 │   └── run_webhook_server.sh
 └── venv/
 ```
@@ -29,7 +31,7 @@ Mac mini 안의 고정 경로 예시:
 
 Mac mini에서 아래 항목이 준비되어 있어야 합니다.
 
-- Python 3와 `venv`
+- Python 3.10+ 와 `venv`
 - Nginx
 - GitHub webhook secret
 - GitHub Review API를 호출할 토큰
@@ -40,18 +42,31 @@ Mac mini에서 아래 항목이 준비되어 있어야 합니다.
 이 저장소 내용을 Mac mini에서 한 번 받아둔 뒤 아래처럼 고정 경로에 설치합니다.
 
 ```bash
-./scripts/install_local_review.sh /Users/runner/pr-review
+PYTHON_BIN=python3.11 ./scripts/install_local_review.sh /Users/runner/pr-review
 ```
+
+이 스크립트는 `review_runner/requirements.txt`를 설치하면서 `mlx-lm`도 같이 설치합니다.
+공식 문서 기준으로 MLX는 `pip install mlx`, MLX LM은 `pip install mlx-lm`으로 설치합니다.
 
 그 뒤 아래 환경 변수를 설정합니다.
 
 - `LOCAL_REVIEW_HOME=/Users/runner/pr-review`
 - `GITHUB_TOKEN=...`
 - `GITHUB_WEBHOOK_SECRET=...`
-- `MLX_REVIEW_CMD=/Users/runner/pr-review/venv/bin/python -m review_runner.sample_mlx_client`
+- `MLX_REVIEW_CMD=/Users/runner/pr-review/venv/bin/python -m review_runner.mlx_review_client`
+- `MLX_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit`
+- `MLX_MAX_TOKENS=1200` (옵션)
+- `MLX_MAX_FINDINGS=10` (옵션)
+- `MLX_TRUST_REMOTE_CODE=0` (옵션)
 - `GITHUB_API_URL=https://api.github.com` (옵션)
 
-실전에서는 `sample_mlx_client.py` 대신 실제 MLX 실행 어댑터로 교체하면 됩니다.
+처음 요청에서 모델을 다운받게 하지 않으려면 미리 warm-up을 한 번 실행해두는 편이 좋습니다.
+
+```bash
+export LOCAL_REVIEW_HOME=/Users/runner/pr-review
+export MLX_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+zsh /Users/runner/pr-review/scripts/warm_mlx_model.sh
+```
 
 ## 3. FastAPI 서버 실행
 
@@ -59,7 +74,8 @@ Mac mini에서 아래 항목이 준비되어 있어야 합니다.
 export LOCAL_REVIEW_HOME=/Users/runner/pr-review
 export GITHUB_TOKEN=ghp_xxx
 export GITHUB_WEBHOOK_SECRET=replace-me
-export MLX_REVIEW_CMD="/Users/runner/pr-review/venv/bin/python -m review_runner.sample_mlx_client"
+export MLX_REVIEW_CMD="/Users/runner/pr-review/venv/bin/python -m review_runner.mlx_review_client"
+export MLX_MODEL="mlx-community/Llama-3.2-3B-Instruct-4bit"
 zsh /Users/runner/pr-review/scripts/run_webhook_server.sh
 ```
 
@@ -97,8 +113,9 @@ FastAPI 앱 엔트리포인트는 [`review_runner/webhook_app.py`](/Users/m4_25/
 
 ## 7. MLX 어댑터 교체 포인트
 
-[`review_runner/sample_mlx_client.py`](/Users/m4_25/develop/codereview/review_runner/sample_mlx_client.py)는 스텁입니다.
-실제 사용 시 stdin으로 받은 프롬프트를 MLX 모델에 넘기고, 아래 JSON 형식으로 stdout에 출력하세요.
+실제 MLX 어댑터는 [`review_runner/mlx_review_client.py`](/Users/m4_25/develop/codereview/review_runner/mlx_review_client.py)입니다.
+이 모듈은 `mlx-lm`으로 모델을 로드하고, stdin으로 받은 PR diff payload를 chat prompt로 변환한 뒤,
+아래 JSON 형식만 stdout으로 내보냅니다.
 
 ```json
 {
@@ -115,6 +132,8 @@ FastAPI 앱 엔트리포인트는 [`review_runner/webhook_app.py`](/Users/m4_25/
 ```
 
 `line`은 반드시 해당 patch의 RIGHT-side 유효 라인이어야 합니다.
+[`review_runner/sample_mlx_client.py`](/Users/m4_25/develop/codereview/review_runner/sample_mlx_client.py)는
+기존 경로 호환을 위한 래퍼만 남겨뒀습니다.
 
 ## 8. GitHub Webhook 설정
 
@@ -131,7 +150,8 @@ GitHub 저장소 Settings -> Webhooks에서 아래처럼 연결하면 됩니다.
 export GITHUB_TOKEN=ghp_xxx
 export GITHUB_REPOSITORY=OWNER/REPO
 export GITHUB_EVENT_PATH=/path/to/event.json
-export MLX_REVIEW_CMD="/Users/runner/pr-review/venv/bin/python -m review_runner.sample_mlx_client"
+export MLX_REVIEW_CMD="/Users/runner/pr-review/venv/bin/python -m review_runner.mlx_review_client"
+export MLX_MODEL="mlx-community/Llama-3.2-3B-Instruct-4bit"
 export DRY_RUN=1
 export PYTHONPATH=/Users/runner/pr-review
 /Users/runner/pr-review/venv/bin/python -m review_runner.review_pr

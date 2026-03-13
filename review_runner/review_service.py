@@ -16,7 +16,7 @@ from typing import Any
 
 
 DEFAULT_API_URL = "https://api.github.com"
-DEFAULT_MLX_REVIEW_CMD = "python3 -m review_runner.sample_mlx_client"
+DEFAULT_MLX_REVIEW_CMD = "python3 -m review_runner.mlx_review_client"
 
 
 @dataclass
