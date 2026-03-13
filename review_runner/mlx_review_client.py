@@ -160,12 +160,15 @@ def build_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
             "role": "system",
             "content": (
                 "You are a senior software engineer performing pull request review. "
+                "This task has a strict output contract: respond with exactly one JSON object written for a Korean-speaking reviewer. "
                 "Return exactly one JSON object and nothing else. "
                 "Never wrap the answer in markdown fences. "
+                "The response body must be valid JSON, and every natural-language string value must be written in Korean. "
+                'The only allowed non-Korean values are the event enum values "COMMENT" and "REQUEST_CHANGES", plus file paths, symbols, and API names when translation would be incorrect. '
                 "Report only high-confidence issues that are directly visible in the diff. "
                 "Use strict JSON syntax with double-quoted keys and string values. "
                 "Do not use trailing commas, single quotes, comments, or unquoted enum values. "
-                "All output must be written in Korean. This is mandatory. "
+                "All natural-language output must be written in Korean. This is mandatory and overrides any conflicting habit from the model. "
                 "Write summary, positives, concerns, and every line comment body in Korean only. "
                 "Use only these top-level keys: summary, event, positives, concerns, comments. "
                 "positives and concerns must be JSON arrays, never inline labels such as positive1: or concerns1:. "
@@ -173,6 +176,7 @@ def build_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                 "Do not use English sentences in JSON values unless a file path, symbol, or API name requires it. "
                 f"Return at most {max_findings} findings. "
                 "Do not write praise-only line comments. "
+                'Follow this shape exactly: {"summary":"한국어 요약","event":"COMMENT","positives":["한국어 장점"],"concerns":["한국어 개선점"],"comments":[{"path":"file.py","line":12,"body":"한국어 라인 코멘트"}]}. '
                 'If there are no actionable issues, return {"summary":"...","event":"COMMENT","positives":["..."],"concerns":[],"comments":[]} '
                 "and use summary plus positives to briefly mention what looks strong about the diff in Korean."
             ),
@@ -181,7 +185,10 @@ def build_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
             "role": "user",
             "content": (
                 "Review this pull request diff payload and respond using the response_schema inside it. "
-                "모든 출력은 반드시 한국어로 작성하세요.\n"
+                "반드시 JSON 객체 하나만 반환하세요. "
+                "summary, positives, concerns, comments[].body 의 모든 자연어 문장은 한국어로만 작성하세요. "
+                "event 값만 COMMENT 또는 REQUEST_CHANGES 를 사용할 수 있습니다. "
+                "영문 diff 메타데이터를 그대로 복사하지 말고, 한국어 리뷰 문장으로 정리하세요.\n"
                 f"{compact_payload}"
             ),
         },
