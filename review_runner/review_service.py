@@ -8,7 +8,6 @@ import os
 import shlex
 import ssl
 import subprocess
-import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -464,8 +463,11 @@ def review_pull_request(
         "status": "completed",
         "repository": repository,
         "pull_number": pull_number,
+        "summary": summary,
         "event": event,
         "comment_count": len(comments),
+        "positive_count": len(positives),
+        "concern_count": len(concerns),
         "payload": payload,
     }
 
@@ -473,13 +475,25 @@ def review_pull_request(
         return result
 
     response = github.post_review(pull_number, payload)
+    message_lines = [
+        "Posted review successfully.",
+        f"Review ID: {response.get('id')}",
+        f"Event: {event}",
+        f"Comments: {len(comments)}",
+        "",
+        payload["body"],
+    ]
+    if comments:
+        message_lines.extend(
+            [
+                "",
+                "Inline comments:",
+                *(
+                    f"- {comment.path}:{comment.line} {comment.body}"
+                    for comment in comments
+                ),
+            ]
+        )
     result["review_id"] = response.get("id")
-    result["message"] = textwrap.dedent(
-        f"""\
-        Posted review successfully.
-        Review ID: {response.get('id')}
-        Event: {event}
-        Comments: {len(comments)}
-        """
-    ).strip()
+    result["message"] = "\n".join(message_lines)
     return result
