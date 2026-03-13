@@ -47,6 +47,7 @@ COMMON_TYPO_FIXES = {
     "pull_nubmer": "pull_number",
     "X-GitHub-Eevnt": "X-GitHub-Event",
 }
+
 SECRET_LOG_RE = re.compile(r"\b(token|secret|password|passwd|api[_-]?key|authorization)\b", re.IGNORECASE)
 LOG_CALL_RE = re.compile(r"\b(print|logging\.\w+|logger\.\w+)\s*\(")
 DIFF_STAT_RE = re.compile(r"\d+\s*개\s*(?:추가|삭제|변경)")
