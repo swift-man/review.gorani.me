@@ -42,10 +42,10 @@ NO_CONCERN_TEXTS = {
     "개선이 필요한 점은 없습니다.",
 }
 COMMON_TYPO_FIXES = {
-    "stauts": "status",
-    "repositroy": "repository",
-    "pull_nubmer": "pull_number",
-    "X-GitHub-Eevnt": "X-GitHub-Event",
+    ("sta", "uts"): "status",
+    ("reposit", "roy"): "repository",
+    ("pull", "_nub", "mer"): "pull_number",
+    ("X-GitHub-", "Eevnt"): "X-GitHub-Event",
 }
 
 SECRET_LOG_RE = re.compile(r"\b(token|secret|password|passwd|api[_-]?key|authorization)\b", re.IGNORECASE)
@@ -132,6 +132,24 @@ def sanitize_positive_items(items: list[str], max_items: int = 5) -> list[str]:
             break
 
     return sanitized
+
+
+def looks_like_praise_only_comment(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+
+    if looks_like_generic_positive(normalized):
+        return True
+
+    lowered = normalized.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "핵심 변경 의도가 diff 안에서 비교적 명확하게 드러납니다.",
+            "변경 범위가 비교적 집중되어 있어 의도를 따라가기 쉽습니다.",
+        )
+    )
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -426,7 +444,8 @@ def detect_contract_typos(pr_file: PullRequestFile) -> list[ReviewComment]:
         if kind != "add":
             continue
 
-        for typo, expected in COMMON_TYPO_FIXES.items():
+        for typo_parts, expected in COMMON_TYPO_FIXES.items():
+            typo = "".join(typo_parts)
             if f'"{typo}"' not in text and f"'{typo}'" not in text:
                 continue
             findings.append(
@@ -616,7 +635,7 @@ def validate_mlx_output(
         path = raw.get("path")
         line = raw.get("line")
         body = normalize_text(raw.get("body"))
-        if not path or not isinstance(line, int) or not body:
+        if not path or not isinstance(line, int) or not body or looks_like_praise_only_comment(body):
             continue
 
         pr_file = file_index.get(path)
