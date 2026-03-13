@@ -29,6 +29,12 @@ DEFAULT_FALLBACK_POSITIVES = [
     "변경 범위가 비교적 집중되어 있어 의도를 따라가기 쉽습니다.",
 ]
 DEFAULT_NO_CONCERNS_TEXT = "이번 diff 기준으로 별도 개선 필요 사항은 발견되지 않았습니다."
+LOW_SIGNAL_POSITIVE_MARKERS = (
+    "pr diff가 잘 작성",
+    "pr diff의 내용이 잘 정리",
+    "변경 내용이 잘 정리",
+    "모든 파일이 잘 수정",
+)
 NO_CONCERN_TEXTS = {
     DEFAULT_NO_CONCERNS_TEXT,
     "별도 개선 필요 사항은 발견되지 않았습니다.",
@@ -95,6 +101,28 @@ def sanitize_text_items(items: list[str], max_items: int = 5) -> list[str]:
             or text in NO_CONCERN_TEXTS
             or looks_like_prompt_echo(text)
             or looks_like_diff_stat_dump(text)
+        ):
+            continue
+        seen.add(text)
+        sanitized.append(text)
+        if len(sanitized) >= max_items:
+            break
+
+    return sanitized
+
+
+def sanitize_positive_items(items: list[str], max_items: int = 5) -> list[str]:
+    sanitized: list[str] = []
+    seen: set[str] = set()
+
+    for item in items:
+        text = normalize_text(item)
+        if (
+            not text
+            or text in seen
+            or looks_like_prompt_echo(text)
+            or looks_like_diff_stat_dump(text)
+            or looks_like_generic_positive(text)
         ):
             continue
         seen.add(text)
@@ -279,6 +307,22 @@ def summarize_comment_bodies(comments: list[ReviewComment], max_items: int = 3) 
     return summaries
 
 
+def merge_distinct_items(primary: list[str], secondary: list[str], max_items: int = 5) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    for item in [*primary, *secondary]:
+        text = normalize_text(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+        if len(merged) >= max_items:
+            break
+
+    return merged
+
+
 def iter_patch_lines(patch: str) -> list[tuple[str, int, str]]:
     rows: list[tuple[str, int, str]] = []
     current_new_line: int | None = None
@@ -447,6 +491,13 @@ def looks_like_diff_stat_dump(text: str) -> bool:
     return number_count >= 8 and stat_word_count >= 6
 
 
+def looks_like_generic_positive(text: str) -> bool:
+    normalized = normalize_text(text).lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in LOW_SIGNAL_POSITIVE_MARKERS)
+
+
 def sanitize_summary(summary: Any, has_findings: bool) -> str:
     normalized = normalize_text(summary)
     fallback = DEFAULT_FINDINGS_SUMMARY if has_findings else DEFAULT_NO_FINDINGS_SUMMARY
@@ -585,8 +636,10 @@ def validate_mlx_output(
         comments.append(comment)
 
     summary = normalize_text(result.get("summary")) or "자동 리뷰를 완료했습니다."
-    positives = sanitize_text_items(normalize_text_list(result.get("positives"), max_items=10))
+    positives = sanitize_positive_items(normalize_text_list(result.get("positives"), max_items=10))
     concerns = sanitize_text_items(normalize_text_list(result.get("concerns"), max_items=10))
+    comment_summaries = summarize_comment_bodies(comments, max_items=3)
+    concerns = merge_distinct_items(concerns, comment_summaries, max_items=3)
 
     event = normalize_text(result.get("event")).upper()
     if event not in {"COMMENT", "REQUEST_CHANGES"}:
@@ -601,8 +654,6 @@ def validate_mlx_output(
         summary = sanitize_summary(summary, has_findings=True)
         if not positives:
             positives = ["핵심 변경 의도가 diff 안에서 비교적 명확하게 드러납니다."]
-        if not concerns:
-            concerns = summarize_comment_bodies(comments)
         event = "REQUEST_CHANGES"
 
     return comments, summary, event, positives, concerns
