@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import ssl
 import subprocess
@@ -23,10 +24,20 @@ DEFAULT_CA_BUNDLE_ENV = "GITHUB_CA_BUNDLE"
 DEFAULT_NO_FINDINGS_SUMMARY = (
     "즉시 수정이 필요한 문제는 보이지 않습니다. 변경 범위가 명확하고 전체 흐름도 비교적 잘 드러납니다."
 )
+DEFAULT_FINDINGS_SUMMARY = "자동 리뷰에서 확인이 필요한 변경 사항이 발견되었습니다. 아래 코멘트와 개선점을 확인해 주세요."
 DEFAULT_FALLBACK_POSITIVES = [
     "변경 범위가 비교적 집중되어 있어 의도를 따라가기 쉽습니다.",
 ]
 DEFAULT_NO_CONCERNS_TEXT = "이번 diff 기준으로 별도 개선 필요 사항은 발견되지 않았습니다."
+DIFF_STAT_RE = re.compile(r"\d+\s*개\s*(?:추가|삭제|변경)")
+PROMPT_ECHO_MARKERS = (
+    "review_runner/",
+    "valid_comment_lines",
+    "RIGHT-side",
+    "response_schema",
+    "style-only",
+    "praise-only",
+)
 
 
 def normalize_text(value: Any) -> str:
@@ -56,6 +67,27 @@ def normalize_text_list(value: Any, max_items: int = 5) -> list[str]:
             break
 
     return normalized_items
+
+
+def sanitize_text_items(items: list[str], max_items: int = 5) -> list[str]:
+    sanitized: list[str] = []
+    seen: set[str] = set()
+
+    for item in items:
+        text = normalize_text(item)
+        if (
+            not text
+            or text in seen
+            or looks_like_prompt_echo(text)
+            or looks_like_diff_stat_dump(text)
+        ):
+            continue
+        seen.add(text)
+        sanitized.append(text)
+        if len(sanitized) >= max_items:
+            break
+
+    return sanitized
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -232,9 +264,9 @@ def summarize_comment_bodies(comments: list[ReviewComment], max_items: int = 3) 
     return summaries
 
 
-def format_no_findings_summary(summary: str) -> str:
+def is_placeholder_summary(summary: str) -> bool:
     normalized = normalize_text(summary)
-    if not normalized or normalized in {
+    return not normalized or normalized in {
         "Automated review completed.",
         "Automated MLX review completed.",
         "No actionable issues found.",
@@ -242,8 +274,39 @@ def format_no_findings_summary(summary: str) -> str:
         "자동 MLX 리뷰를 완료했습니다.",
         "검토할 만한 문제를 찾지 못했습니다.",
         "지적할 만한 문제는 보이지 않습니다.",
-    }:
-        return DEFAULT_NO_FINDINGS_SUMMARY
+    }
+
+
+def looks_like_prompt_echo(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in PROMPT_ECHO_MARKERS)
+
+
+def looks_like_diff_stat_dump(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+
+    if len(DIFF_STAT_RE.findall(normalized)) >= 4:
+        return True
+
+    number_count = len(re.findall(r"\d+", normalized))
+    stat_word_count = sum(normalized.count(word) for word in ("추가", "삭제", "변경"))
+    return number_count >= 8 and stat_word_count >= 6
+
+
+def sanitize_summary(summary: Any, has_findings: bool) -> str:
+    normalized = normalize_text(summary)
+    fallback = DEFAULT_FINDINGS_SUMMARY if has_findings else DEFAULT_NO_FINDINGS_SUMMARY
+
+    if (
+        is_placeholder_summary(normalized)
+        or looks_like_prompt_echo(normalized)
+        or looks_like_diff_stat_dump(normalized)
+    ):
+        return fallback
 
     return normalized
 
@@ -278,6 +341,7 @@ def make_prompt(repository: str, pull_number: int, files: list[PullRequestFile])
                 "concerns에는 개선이 필요한 점을 0~3개 정도 작성하세요.",
                 "문제가 없더라도 positives는 반드시 1개 이상 작성하세요.",
                 "라인 코멘트와 summary/concerns 내용은 diff에 근거해야 합니다.",
+                "파일별 추가/삭제/변경 개수나 line 번호를 summary에 나열하지 마세요.",
             ],
             "response_schema": {
                 "summary": "짧은 전체 리뷰 요약 (한국어)",
@@ -359,19 +423,20 @@ def validate_mlx_output(
         comments.append(ReviewComment(path=path, line=line, body=body))
 
     summary = normalize_text(result.get("summary")) or "자동 리뷰를 완료했습니다."
-    positives = normalize_text_list(result.get("positives"), max_items=5)
-    concerns = normalize_text_list(result.get("concerns"), max_items=5)
+    positives = sanitize_text_items(normalize_text_list(result.get("positives"), max_items=10))
+    concerns = sanitize_text_items(normalize_text_list(result.get("concerns"), max_items=10))
 
     event = normalize_text(result.get("event")).upper()
     if event not in {"COMMENT", "REQUEST_CHANGES"}:
         event = "REQUEST_CHANGES" if (comments or concerns) else "COMMENT"
 
     if not comments and not concerns:
-        summary = format_no_findings_summary(summary)
+        summary = sanitize_summary(summary, has_findings=False)
         if not positives:
             positives = list(DEFAULT_FALLBACK_POSITIVES)
         event = "COMMENT"
     else:
+        summary = sanitize_summary(summary, has_findings=True)
         if not positives:
             positives = ["핵심 변경 의도가 diff 안에서 비교적 명확하게 드러납니다."]
         if not concerns:
