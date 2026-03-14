@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -47,8 +48,12 @@ def should_process_pull_request(event: dict[str, Any]) -> tuple[bool, str]:
 
 
 def handle_pull_request_event(repository: str, pull_number: int, delivery_id: str | None) -> None:
+    started_at = time.monotonic()
+    prefix = f"[delivery={delivery_id}] " if delivery_id else ""
+    print(f"{prefix}Starting review for {repository}#{pull_number}", flush=True)
     api_url = os.environ.get("GITHUB_API_URL", DEFAULT_API_URL)
     auth = resolve_github_token(repository=repository, api_url=api_url)
+    print(f"{prefix}Resolved GitHub auth via {auth.source}", flush=True)
     result = review_pull_request(
         repository=repository,
         pull_number=pull_number,
@@ -56,8 +61,10 @@ def handle_pull_request_event(repository: str, pull_number: int, delivery_id: st
         api_url=api_url,
         dry_run=os.environ.get("DRY_RUN") == "1",
         auth_source=auth.source,
+        log_prefix=prefix,
     )
-    prefix = f"[delivery={delivery_id}] " if delivery_id else ""
+    duration = time.monotonic() - started_at
+    print(f"{prefix}Review finished in {duration:.1f}s", flush=True)
     print(prefix + json.dumps(result, ensure_ascii=False))
 
 

@@ -68,6 +68,10 @@ PROMPT_ECHO_MARKERS = (
 )
 
 
+def log_progress(prefix: str, message: str) -> None:
+    print(f"{prefix}{message}", flush=True)
+
+
 def normalize_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
@@ -873,10 +877,14 @@ def review_pull_request(
     api_url: str = DEFAULT_API_URL,
     dry_run: bool = False,
     auth_source: str | None = None,
+    log_prefix: str = "",
 ) -> dict[str, Any]:
+    started_at = time.monotonic()
     github = GitHubApi(token=token, repository=repository, api_url=api_url)
+    log_progress(log_prefix, f"Fetching PR files for {repository}#{pull_number}")
     raw_files = github.list_pr_files(pull_number)
     pr_files = build_pr_files(raw_files)
+    log_progress(log_prefix, f"Loaded {len(pr_files)} patchable file(s)")
 
     if not pr_files:
         return {
@@ -892,7 +900,10 @@ def review_pull_request(
         with open(debug_path, "w", encoding="utf-8") as fh:
             fh.write(prompt)
 
+    mlx_started_at = time.monotonic()
+    log_progress(log_prefix, "Running MLX review model")
     mlx_result = run_mlx(prompt)
+    log_progress(log_prefix, f"MLX review completed in {time.monotonic() - mlx_started_at:.1f}s")
     comments, summary, event, positives, concerns = validate_mlx_output(mlx_result, pr_files)
     payload = build_review_payload(summary, event, comments, positives, concerns)
 
@@ -910,11 +921,13 @@ def review_pull_request(
     }
 
     if dry_run:
+        log_progress(log_prefix, f"Dry run completed in {time.monotonic() - started_at:.1f}s")
         return result
 
     posted_event = event
     fallback_note = ""
     try:
+        log_progress(log_prefix, f"Posting GitHub review as {event}")
         response = github.post_review(pull_number, payload)
     except RuntimeError as exc:
         if not should_retry_review_as_comment(exc, payload):
@@ -922,6 +935,7 @@ def review_pull_request(
 
         retry_payload = dict(payload)
         retry_payload["event"] = "COMMENT"
+        log_progress(log_prefix, "Retrying review post as COMMENT because REQUEST_CHANGES was rejected")
         response = github.post_review(pull_number, retry_payload)
         payload = retry_payload
         posted_event = "COMMENT"
@@ -953,4 +967,5 @@ def review_pull_request(
         )
     result["review_id"] = response.get("id")
     result["message"] = "\n".join(message_lines)
+    log_progress(log_prefix, f"Review posted successfully in {time.monotonic() - started_at:.1f}s")
     return result
