@@ -13,7 +13,7 @@ import threading
 from typing import Any
 
 
-DEFAULT_MODEL = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+DEFAULT_MODEL = "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
 DEFAULT_MAX_TOKENS = 1200
 DEFAULT_MAX_FINDINGS = 10
 DEFAULT_SUMMARY = "즉시 수정이 필요한 문제는 보이지 않습니다. 변경 범위가 명확하고 전체 흐름도 비교적 잘 드러납니다."
@@ -179,6 +179,7 @@ def build_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                 "If any of those patterns appear in added lines, you must add at least one concern and one line comment, and set event to REQUEST_CHANGES. "
                 "Do not answer with generic praise such as 'PR diff가 잘 작성되었습니다' or '잘 정리되어 있습니다' unless it is tied to a specific strength visible in the diff. "
                 "Do not say there are no improvements needed when the diff removes a guard, returns early from a validation branch, or prints a secret value. "
+                "Do not flag an MLX_MODEL value change by itself unless the diff also shows a concrete compatibility, availability, memory, or rollout risk. "
                 f"Return at most {max_findings} findings. "
                 "Do not write praise-only line comments. "
                 'Follow this shape exactly: {"summary":"한국어 요약","event":"COMMENT","positives":["한국어 장점"],"concerns":["한국어 개선점"],"comments":[{"path":"file.py","line":12,"body":"한국어 라인 코멘트"}]}. '
@@ -196,6 +197,7 @@ def build_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                 "추가된 코드에서 검증 우회, 인증/서명 체크 제거, 민감정보 로그 출력, 예외 대신 성공 반환이 보이면 반드시 지적하세요. "
                 "특히 signature 검증을 건너뛰는 return, token/secret 출력은 높은 우선순위 이슈로 취급하세요. "
                 "공개 응답 키 이름이나 GitHub 헤더 이름의 오타처럼 기본 계약을 깨는 변경도 반드시 지적하세요. "
+                "단순히 MLX_MODEL 값이 바뀌었다는 이유만으로는 코멘트하지 말고, 실제 호환성/가용성/메모리 위험이 diff에 보일 때만 지적하세요. "
                 "영문 diff 메타데이터를 그대로 복사하지 말고, 한국어 리뷰 문장으로 정리하세요.\n"
                 f"{compact_payload}"
             ),
