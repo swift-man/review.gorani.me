@@ -12,7 +12,6 @@ import sys
 import threading
 from typing import Any
 
-
 DEFAULT_MODEL = "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
 DEFAULT_MAX_TOKENS = 1200
 DEFAULT_MAX_FINDINGS = 10
