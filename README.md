@@ -91,7 +91,7 @@ PYTHON_BIN="$PY311" ./scripts/install_local_review.sh /Users/runner/pr-review
 - `GITHUB_API_URL=https://api.github.com` (옵션)
 - `MLX_MAX_TOKENS=1600` (옵션, 모델 출력 토큰 상한. Apple Silicon 64GB급 로컬 운영은 품질 우선으로 넉넉하게 둠)
 - `MLX_MAX_FINDINGS=10` (옵션)
-- `MLX_REVIEW_CONTEXT_MODE=full` (옵션, 기본값. 변경 파일을 최신 PR HEAD 기준 line-numbered full code로 읽고, diff는 코멘트 anchor로만 사용. 변경 외 repo 파일까지 `repository_context`로 보려면 `full_repo`. 입력을 줄여야 하면 `auto`, `excerpt`, `off` 가능. webhook 서버는 `scripts/run_webhook_server.sh`에서 동일하게 `full`로 시작)
+- `MLX_REVIEW_CONTEXT_MODE=auto` (webhook 서버 운영 기본값. 작은 변경 파일은 최신 PR HEAD 기준 line-numbered full code로 읽고, 큰 파일은 hunk 주변 excerpt로 낮춰 장시간 batch가 새 HEAD push에 계속 추월되지 않게 함. 이때 diff patch는 큰 파일 excerpt의 hunk 범위 계산과 GitHub 코멘트 anchor에 함께 사용. 모든 변경 파일을 강제로 full code로 보려면 `full`, 변경 외 repo 파일까지 `repository_context`로 보려면 `full_repo`, 더 줄이려면 `excerpt`/`off` 사용)
 - `MLX_REVIEW_CONTEXT_MAX_CHARS` (옵션, 파일별 current code context 최대 길이. 코드와 webhook 서버 기본값은 220000)
 - `MLX_REVIEW_PROMPT_MAX_CHARS=220000` (옵션, 전체 리뷰 prompt가 이 값을 넘으면 변경 파일을 여러 묶음으로 나눠 generate 서버의 `MLX_GENERATE_MAX_PROMPT_CHARS` 상한을 넘지 않게 함)
 - `MLX_REVIEW_CONTEXT_LINE_RADIUS=120` (옵션, 큰 파일 excerpt에서 hunk 앞뒤로 포함할 기본 줄 수)
@@ -560,10 +560,11 @@ RIGHT-side 유효 라인이어야 합니다. 모델이 만든 finding은 `commen
 false positive 방지를 위해 게시하지 않습니다. `Blocking`/`Major`는 본문 `Confidence: High`와 numeric
 `confidence >= 0.8`을 모두 만족할 때만 게시됩니다.
 
-프롬프트의 `files[]`에는 GitHub diff patch와 함께 `current_file_context`가 들어갑니다. 기본 `full` 모드에서는
-변경 파일을 최신 PR HEAD의 전체 파일 기준 line-numbered 형태로 넣고, diff patch는 GitHub 코멘트 anchor로만 사용합니다.
-파일별 최대 길이 때문에 잘린 파일은 `full_file_truncated`로 표시합니다. 입력을 줄이기 위해 `auto` 또는 `excerpt`
-모드를 명시한 경우에만 큰 파일은 모든 hunk 주변을 보존하도록 반경을 줄인 excerpt로 대체될 수 있습니다.
+프롬프트의 `files[]`에는 GitHub diff patch와 함께 `current_file_context`가 들어갑니다. webhook 운영 기본 `auto`
+모드에서는 작은 변경 파일을 최신 PR HEAD의 전체 파일 기준 line-numbered 형태로 넣고, 파일별 최대 길이를 넘는
+큰 파일은 모든 hunk 주변을 보존하도록 반경을 줄인 excerpt로 대체합니다. diff patch는 excerpt 생성을 위한
+hunk 범위 계산과 GitHub 코멘트 anchor에 모두 사용합니다. 모든 변경 파일을 강제로 full code로 보려면 `MLX_REVIEW_CONTEXT_MODE=full`을 명시할 수 있으며,
+이때 파일별 최대 길이 때문에 잘린 파일은 `full_file_truncated`로 표시합니다.
 `full_repo` 모드에서는 변경 파일 외 repo 파일도 `.reviewbot.yml`/built-in 필터와
 Apple Silicon 64GB급 운영 예산 안에서 `repository_context`로 추가합니다. 모델은 이 context로 diff 밖 호출자와 helper 흐름을 검증하지만,
 GitHub Review API 제약 때문에 실제 코멘트 line은 여전히 `valid_comment_lines` 안에서만 선택해야 합니다.

@@ -29,10 +29,11 @@ export MLX_MODEL="mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
 # Apple Silicon 64GB급 로컬 운영은 품질 우선으로 출력 상한을 넉넉하게 둔다.
 export MLX_MAX_TOKENS=1600
 # PR 리뷰 입력은 diff만 보지 않고 최신 PR HEAD의 변경 파일 full code를 함께 봅니다.
-# webhook 서버(run_webhook_server.sh)는 기본을 full/220000 으로 두어 변경 파일은
-# line-numbered 전체 코드로 읽고, diff 는 코멘트 anchor 로만 사용합니다.
-# 입력을 줄여야 할 때는 auto(큰 파일 excerpt fallback) 또는 excerpt 로 낮출 수 있습니다.
+# webhook 서버(run_webhook_server.sh)의 기본값은 auto/220000 입니다. 작은 변경 파일은
+# line-numbered 전체 코드로 읽고, 큰 파일은 hunk 주변 excerpt 로 낮춥니다.
+# 기본 auto 대신 모든 변경 파일을 강제로 full code 로 보려면 full 로 명시합니다.
 # 변경 외 repo 파일까지 보려면 full_repo 로 올릴 수 있습니다.
+# export MLX_REVIEW_CONTEXT_MODE=full
 # export MLX_REVIEW_CONTEXT_MODE=full_repo
 # export MLX_REVIEW_CONTEXT_MAX_CHARS=220000
 # 전체 prompt 가 generate 서버 상한을 넘으면 변경 파일을 여러 묶음으로 나눠 리뷰합니다.
