@@ -31,11 +31,11 @@ COPILOT_REVIEW_REQUEST_COST="${COPILOT_REVIEW_REQUEST_COST:-13}"
 COPILOT_REVIEWER="${COPILOT_REVIEWER:-copilot}"
 
 # 리뷰 입력 컨텍스트 기본값도 시작 스크립트에서 관리한다.
-# 코드 기본값(review_service.DEFAULT_CURRENT_FILE_CONTEXT_MODE)은 CLI 호환을 위해 full 이지만,
 # webhook 운영 기본값은 auto 로 둔다. 작은 변경 파일은 최신 PR HEAD 기준 line-numbered
 # 전체 코드로 읽고, MAX_CHARS 를 넘는 큰 파일은 변경 hunk 주변 excerpt 로 낮춰 리뷰가
 # 새 HEAD push 에 계속 추월되지 않게 한다. diff 는 excerpt 생성을 위한 hunk 범위 계산과
 # GitHub 코멘트 anchor 에 모두 사용한다.
+# 코드 기본값(review_service.DEFAULT_CURRENT_FILE_CONTEXT_MODE)은 CLI 호환을 위해 full 로 남겨둔다.
 # 변경 외 repo 파일까지 붙이는 full_repo 는 입력이 크게 늘 수 있으므로 명시할 때만 켠다.
 # 모든 변경 파일을 강제로 full context 로 보려면 MLX_REVIEW_CONTEXT_MODE=full 로 올릴 수 있다.
 # local_review_env.sh 에서 같은 이름을 지정하면 이 기본값을 덮어쓸 수 있다.

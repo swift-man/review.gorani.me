@@ -91,7 +91,7 @@ PYTHON_BIN="$PY311" ./scripts/install_local_review.sh /Users/runner/pr-review
 - `GITHUB_API_URL=https://api.github.com` (옵션)
 - `MLX_MAX_TOKENS=1600` (옵션, 모델 출력 토큰 상한. Apple Silicon 64GB급 로컬 운영은 품질 우선으로 넉넉하게 둠)
 - `MLX_MAX_FINDINGS=10` (옵션)
-- `MLX_REVIEW_CONTEXT_MODE=auto` (webhook 서버 운영 기본값. 작은 변경 파일은 최신 PR HEAD 기준 line-numbered full code로 읽고, 큰 파일은 hunk 주변 excerpt로 낮춰 장시간 batch가 새 HEAD push에 계속 추월되지 않게 함. 모든 변경 파일을 강제로 full code로 보려면 `full`, 변경 외 repo 파일까지 `repository_context`로 보려면 `full_repo`, 더 줄이려면 `excerpt`/`off` 사용)
+- `MLX_REVIEW_CONTEXT_MODE=auto` (webhook 서버 운영 기본값. 작은 변경 파일은 최신 PR HEAD 기준 line-numbered full code로 읽고, 큰 파일은 hunk 주변 excerpt로 낮춰 장시간 batch가 새 HEAD push에 계속 추월되지 않게 함. 이때 diff patch는 큰 파일 excerpt의 hunk 범위 계산과 GitHub 코멘트 anchor에 함께 사용. 모든 변경 파일을 강제로 full code로 보려면 `full`, 변경 외 repo 파일까지 `repository_context`로 보려면 `full_repo`, 더 줄이려면 `excerpt`/`off` 사용)
 - `MLX_REVIEW_CONTEXT_MAX_CHARS` (옵션, 파일별 current code context 최대 길이. 코드와 webhook 서버 기본값은 220000)
 - `MLX_REVIEW_PROMPT_MAX_CHARS=220000` (옵션, 전체 리뷰 prompt가 이 값을 넘으면 변경 파일을 여러 묶음으로 나눠 generate 서버의 `MLX_GENERATE_MAX_PROMPT_CHARS` 상한을 넘지 않게 함)
 - `MLX_REVIEW_CONTEXT_LINE_RADIUS=120` (옵션, 큰 파일 excerpt에서 hunk 앞뒤로 포함할 기본 줄 수)
