@@ -31,15 +31,14 @@ COPILOT_REVIEW_REQUEST_COST="${COPILOT_REVIEW_REQUEST_COST:-13}"
 COPILOT_REVIEWER="${COPILOT_REVIEWER:-copilot}"
 
 # 리뷰 입력 컨텍스트 기본값도 시작 스크립트에서 관리한다.
-# 코드 기본값(review_service.DEFAULT_CURRENT_FILE_CONTEXT_MODE)도 full 이라 CLI 와
-# webhook 이 같은 동작을 하며, 여기서는 운영 기본값을 한곳에서 명시해 둔다.
-# full 은 변경 파일을 최신 PR HEAD 기준 line-numbered 전체 코드로 읽고,
-# diff 는 GitHub 코멘트 anchor 로만 사용한다. MAX_CHARS 를 넘는 초대형 파일은
-# full_file_truncated 로 표시된다.
+# 코드 기본값(review_service.DEFAULT_CURRENT_FILE_CONTEXT_MODE)은 CLI 호환을 위해 full 이지만,
+# webhook 운영 기본값은 auto 로 둔다. 작은 변경 파일은 최신 PR HEAD 기준 line-numbered
+# 전체 코드로 읽고, MAX_CHARS 를 넘는 큰 파일은 변경 hunk 주변 excerpt 로 낮춰 리뷰가
+# 새 HEAD push 에 계속 추월되지 않게 한다. diff 는 GitHub 코멘트 anchor 로만 사용한다.
 # 변경 외 repo 파일까지 붙이는 full_repo 는 입력이 크게 늘 수 있으므로 명시할 때만 켠다.
-# 입력을 줄여야 하면 auto 또는 excerpt 로 낮출 수 있다.
+# 모든 변경 파일을 강제로 full context 로 보려면 MLX_REVIEW_CONTEXT_MODE=full 로 올릴 수 있다.
 # local_review_env.sh 에서 같은 이름을 지정하면 이 기본값을 덮어쓸 수 있다.
-MLX_REVIEW_CONTEXT_MODE="${MLX_REVIEW_CONTEXT_MODE:-full}"
+MLX_REVIEW_CONTEXT_MODE="${MLX_REVIEW_CONTEXT_MODE:-auto}"
 MLX_REVIEW_CONTEXT_MAX_CHARS="${MLX_REVIEW_CONTEXT_MAX_CHARS:-220000}"
 
 # 리뷰 생성이 끝난 뒤 GitHub Review API가 일시 장애/레이트리밋을 반환하면 짧게 대기 후
