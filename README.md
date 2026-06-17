@@ -562,8 +562,8 @@ false positive 방지를 위해 게시하지 않습니다. `Blocking`/`Major`는
 
 프롬프트의 `files[]`에는 GitHub diff patch와 함께 `current_file_context`가 들어갑니다. webhook 운영 기본 `auto`
 모드에서는 작은 변경 파일을 최신 PR HEAD의 전체 파일 기준 line-numbered 형태로 넣고, 파일별 최대 길이를 넘는
-큰 파일은 모든 hunk 주변을 보존하도록 반경을 줄인 excerpt로 대체합니다. diff patch는 GitHub 코멘트 anchor로만
-사용합니다. 모든 변경 파일을 강제로 full code로 보려면 `MLX_REVIEW_CONTEXT_MODE=full`을 명시할 수 있으며,
+큰 파일은 모든 hunk 주변을 보존하도록 반경을 줄인 excerpt로 대체합니다. diff patch는 excerpt 생성을 위한
+hunk 범위 계산과 GitHub 코멘트 anchor에 모두 사용합니다. 모든 변경 파일을 강제로 full code로 보려면 `MLX_REVIEW_CONTEXT_MODE=full`을 명시할 수 있으며,
 이때 파일별 최대 길이 때문에 잘린 파일은 `full_file_truncated`로 표시합니다.
 `full_repo` 모드에서는 변경 파일 외 repo 파일도 `.reviewbot.yml`/built-in 필터와
 Apple Silicon 64GB급 운영 예산 안에서 `repository_context`로 추가합니다. 모델은 이 context로 diff 밖 호출자와 helper 흐름을 검증하지만,
